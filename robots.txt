@@ -1,3 +1,6 @@
 # robots.txt
-Disallow: /libs/
-Disallow: /public/
+User-agent: *
+Disallow: 
+Disallow: /config/
+Disallow: /admin/
+Disallow: /install/

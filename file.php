@@ -1,10 +1,8 @@
-<?php
-require __DIR__ . '/libs/function.php';
-require APP_ROOT . '/libs/class.upload.php';
-require APP_ROOT . '/libs/WaterMask.php';
 
-// 检查是否开启api上传
-if ($config['apiStatus']) {header('Access-Control-Allow-Origin:*');}
+<?php
+require __DIR__ . '/application/function.php';
+require APP_ROOT . '/application/class.upload.php';
+require APP_ROOT . '/application/WaterMask.php';
 
 $handle = new Upload($_FILES['file'], 'zh_CN');
 
@@ -14,7 +12,7 @@ if ($handle->uploaded) {
     // 文件命名
     $handle->file_new_name_body = imgName();
     // 最大上传限制
-    $handle->file_max_sizes = $config['maxSize'];
+    //$handle->file_max_sizes = $config['maxSize'];
     // 最大宽度
     $handle->image_max_width = $config['maxWidth'];
     // 最大高度
@@ -26,12 +24,14 @@ if ($handle->uploaded) {
     // 转换图片为指定格式
     $handle->image_convert = $config['imgConvert'];
 
-    //等比例缩减图片
+    /* 等比例缩减图片 放到前端了
     if ($config['imgRatio']) {
         $handle->image_resize = true;
         $handle->image_x = $config['image_x'];
         $handle->image_y = $config['image_y'];
     }
+    */
+
     // 存储图片路径:images/201807/
     $handle->process(APP_ROOT . config_path());
 
@@ -42,12 +42,12 @@ if ($handle->uploaded) {
                 if (isAnimatedGif($handle->file_src_pathname) === 0) {
                     $arr = [
                         #  水印图片路径（如果不存在将会被当成是字符串水印）
-                         'res' => $config['waterText'],
+                        'res' => $config['waterText'],
                         #  水印显示位置
-                         'pos' => $config['waterPosition'],
+                        'pos' => $config['waterPosition'],
                         #  不指定name(会覆盖原图，也就是保存成thumb.jpeg)
-                         'name' => $handle->file_dst_pathname,
-                        'font' => $config['textFont'],
+                        'name' => $handle->file_dst_pathname,
+                        'font' => APP_ROOT . $config['textFont'],
                         'fontSize' => $config['textSize'],
                         'color' => $config['textColor'],
                     ];
@@ -58,11 +58,11 @@ if ($handle->uploaded) {
                 if (isAnimatedGif($handle->file_src_pathname) === 0) {
                     $arr = [
                         #  水印图片路径（如果不存在将会被当成是字符串水印）
-                         'res' => $config['waterImg'],
+                        'res' => APP_ROOT . $config['waterImg'],
                         #  水印显示位置
-                         'pos' => $config['waterPosition'],
+                        'pos' => $config['waterPosition'],
                         #  不指定name(会覆盖原图，也就是保存成thumb.jpeg)
-                         'name' => $handle->file_dst_pathname,
+                        'name' => $handle->file_dst_pathname,
                     ];
                     Imgs::setWater($handle->file_dst_pathname, $arr);
                 }
@@ -73,13 +73,27 @@ if ($handle->uploaded) {
         }
     }
 
-    // 图片完整相对路径:images/201807/0ed7ccfd4dab9cbc.jpg
+    // 图片完整相对路径:/i/2021/05/03/k88e7p.jpg
     if ($handle->processed) {
         header('Content-type:text/json');
         // 上传成功后返回json数据
+        $imageUrl = $config['imgurl'] . config_path() . $handle->file_dst_name;
+
+        // 判断PHP版本启用删除
+        $ver = substr(PHP_VERSION, 0, 3);
+        if ($ver >= '7.0') {
+            $delUrl = $config['domain']  . '/application/del.php?hash=' . urlHash(config_path() . $handle->file_dst_name, 0);
+        } else {
+            $delUrl = 'PHP≥7.0 才能启用删除！';
+        }
+
+        // 创建缩略图
+        @creat_cache_images($handle->file_dst_name);
+
         $reJson = array(
             "result" => 'success',
-            "url" => $config['domain'] . config_path() . $handle->file_dst_name,
+            "url" => $imageUrl,
+            "del" =>  $delUrl,
         );
         echo json_encode($reJson);
         $handle->clean();
@@ -89,7 +103,31 @@ if ($handle->uploaded) {
             "result" => 'failed',
             "message" => $handle->error,
         );
-        echo json_encode($reJson,JSON_UNESCAPED_UNICODE);
+        echo json_encode($reJson, JSON_UNESCAPED_UNICODE);
     }
+
+    // 压缩图片 后压缩模式，不影响前台输出速度
+    if ($config['compress']) {
+        if (!isAnimatedGif($handle->file_dst_pathname)) {
+            require 'application/compress/Imagick/class.Imgcompress.php';
+            $img = new Imgcompress($handle->file_dst_pathname, 1);
+            $img->compressImg($handle->file_dst_pathname);
+            // 释放
+            ob_flush();
+            flush();
+        }
+    }
+    // 上传日志控制
+    if ($config['upload_logs'] == true) {
+        require_once APP_ROOT . '/application/logs-write.php';
+        @write_log(config_path() . $handle->file_dst_name,md5_file(APP_ROOT.config_path() . $handle->file_dst_name));
+    }
+
     unset($handle);
+
+    // 图片违规检查
+    if ($config['checkImg']) {
+        require_once APP_ROOT . '/config/api_key.php';
+        @checkImg($imageUrl);
+    }
 }
